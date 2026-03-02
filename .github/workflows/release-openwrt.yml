@@ -14,10 +14,12 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
         with:
-          submodules: recursive # اگر پروژه ساب‌ماژول دارد، حتماً دانلود شوند
+          submodules: recursive
 
       - name: List files for debugging
-        run: ls -R # برای اطمینان از وجود Cargo.toml در ریشه
+        run: |
+          pwd
+          ls -F
 
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
@@ -26,25 +28,43 @@ jobs:
 
       - name: Install Cross
         run: |
-          # نصب مستقیم نسخه باینری برای سرعت و اطمینان بیشتر
-          curl -L https://github.com/cross-rs/cross/releases/latest/download/cross-x86_64-unknown-linux-musl.tar.gz | tar xz -C /usr/local/bin
-          curl -L https://github.com/cross-rs/cross/releases/latest/download/cross-util-x86_64-unknown-linux-musl.tar.gz | tar xz -C /usr/local/bin
+          # پیدا کردن آخرین نسخه و نصب فقط فایل اصلی cross
+          LATEST_TAG=$(curl -s https://api.github.com/repos/cross-rs/cross/releases/latest | grep -oP '"tag_name": "\K[^"]+')
+          echo "Installing Cross version $LATEST_TAG"
+          curl -L "https://github.com/cross-rs/cross/releases/download/${LATEST_TAG}/cross-x86_64-unknown-linux-musl.tar.gz" | tar xz -C /usr/local/bin
 
       - name: Build Binary with Cross
         env:
           CROSS_CONTAINER_ENGINE: docker
         run: |
-          # اجرای بیلد با استفاده از کراس
-          cross build --target aarch64-unknown-linux-musl --release
+          # اطمینان از اینکه در ریشه پروژه هستیم و اجرای بیلد
+          if [ -f "Cargo.toml" ]; then
+            cross build --target aarch64-unknown-linux-musl --release
+          else
+            echo "Error: Cargo.toml not found in root directory!"
+            exit 1
+          fi
 
       - name: Archive Binary
         run: |
-          # پیدا کردن فایل اجرایی و فشرده‌سازی
-          # نام فایل اجرایی را بر اساس نام پروژه در Cargo.toml جایگزین کن اگر متفاوت است
-          cd target/aarch64-unknown-linux-musl/release/
-          BINARY_NAME=$(ls -F | grep -v / | head -n 1 | tr -d '*')
-          tar -czf ../../../slipstream-openwrt-aarch64.tar.gz "$BINARY_NAME"
-          cd ../../../
+          # استخراج هوشمند فایل باینری
+          OUTPUT_DIR="target/aarch64-unknown-linux-musl/release"
+          if [ -d "$OUTPUT_DIR" ]; then
+            cd "$OUTPUT_DIR"
+            # پیدا کردن فایل اجرایی (فایلی که دایرکتوری نیست و دسترسی اجرا دارد)
+            BINARY_NAME=$(find . -maxdepth 1 -type f -executable | head -n 1 | sed 's|^\./||')
+            if [ -n "$BINARY_NAME" ]; then
+              tar -czf ../../../slipstream-openwrt-aarch64.tar.gz "$BINARY_NAME"
+              echo "Archived $BINARY_NAME"
+            else
+              echo "Error: No binary found in $OUTPUT_DIR"
+              exit 1
+            fi
+            cd ../../../
+          else
+            echo "Error: Output directory $OUTPUT_DIR not found"
+            exit 1
+          fi
 
       - name: Upload Artifact
         uses: actions/upload-artifact@v4
