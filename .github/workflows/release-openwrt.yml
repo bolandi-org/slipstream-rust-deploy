@@ -1,10 +1,10 @@
-name: Build and Release
+name: Build for OpenWrt
 
 on:
   push:
     tags:
       - 'v*'
-  workflow_dispatch: # این خط باعث ظهور دکمه آبی Run workflow می‌شود
+  workflow_dispatch: # فعال‌سازی دکمه Run workflow در تب Actions
 
 jobs:
   build-openwrt:
@@ -13,6 +13,11 @@ jobs:
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
+        with:
+          submodules: recursive # اگر پروژه ساب‌ماژول دارد، حتماً دانلود شوند
+
+      - name: List files for debugging
+        run: ls -R # برای اطمینان از وجود Cargo.toml در ریشه
 
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
@@ -20,15 +25,25 @@ jobs:
           targets: aarch64-unknown-linux-musl
 
       - name: Install Cross
-        run: cargo install cross --git https://github.com/cross-rs/cross
+        run: |
+          # نصب مستقیم نسخه باینری برای سرعت و اطمینان بیشتر
+          curl -L https://github.com/cross-rs/cross/releases/latest/download/cross-x86_64-unknown-linux-musl.tar.gz | tar xz -C /usr/local/bin
+          curl -L https://github.com/cross-rs/cross/releases/latest/download/cross-util-x86_64-unknown-linux-musl.tar.gz | tar xz -C /usr/local/bin
 
-      - name: Build Binary
-        run: cross build --target aarch64-unknown-linux-musl --release
+      - name: Build Binary with Cross
+        env:
+          CROSS_CONTAINER_ENGINE: docker
+        run: |
+          # اجرای بیلد با استفاده از کراس
+          cross build --target aarch64-unknown-linux-musl --release
 
       - name: Archive Binary
         run: |
+          # پیدا کردن فایل اجرایی و فشرده‌سازی
+          # نام فایل اجرایی را بر اساس نام پروژه در Cargo.toml جایگزین کن اگر متفاوت است
           cd target/aarch64-unknown-linux-musl/release/
-          tar -czf ../../../slipstream-openwrt-aarch64.tar.gz slipstream-client
+          BINARY_NAME=$(ls -F | grep -v / | head -n 1 | tr -d '*')
+          tar -czf ../../../slipstream-openwrt-aarch64.tar.gz "$BINARY_NAME"
           cd ../../../
 
       - name: Upload Artifact
