@@ -18,8 +18,8 @@ jobs:
 
       - name: List files for debugging
         run: |
-          pwd
-          ls -F
+          echo "Current Path: $(pwd)"
+          ls -R
 
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
@@ -37,32 +37,34 @@ jobs:
         env:
           CROSS_CONTAINER_ENGINE: docker
         run: |
-          # اطمینان از اینکه در ریشه پروژه هستیم و اجرای بیلد
-          if [ -f "Cargo.toml" ]; then
-            cross build --target aarch64-unknown-linux-musl --release
-          else
-            echo "Error: Cargo.toml not found in root directory!"
+          # پیدا کردن خودکار مسیر Cargo.toml در صورتی که در ریشه نباشد
+          PROJECT_ROOT=$(find . -name "Cargo.toml" -exec dirname {} \; | head -n 1)
+          if [ -z "$PROJECT_ROOT" ]; then
+            echo "Error: Cargo.toml not found anywhere in the repository!"
             exit 1
           fi
+          
+          echo "Found Cargo.toml in $PROJECT_ROOT. Switching to directory..."
+          cd "$PROJECT_ROOT"
+          
+          # اجرای بیلد دقیقاً مشابه ساختار داکرفایل قبلی
+          cross build --target aarch64-unknown-linux-musl --release
 
       - name: Archive Binary
         run: |
-          # استخراج هوشمند فایل باینری
-          OUTPUT_DIR="target/aarch64-unknown-linux-musl/release"
-          if [ -d "$OUTPUT_DIR" ]; then
-            cd "$OUTPUT_DIR"
-            # پیدا کردن فایل اجرایی (فایلی که دایرکتوری نیست و دسترسی اجرا دارد)
-            BINARY_NAME=$(find . -maxdepth 1 -type f -executable | head -n 1 | sed 's|^\./||')
-            if [ -n "$BINARY_NAME" ]; then
-              tar -czf ../../../slipstream-openwrt-aarch64.tar.gz "$BINARY_NAME"
-              echo "Archived $BINARY_NAME"
-            else
-              echo "Error: No binary found in $OUTPUT_DIR"
-              exit 1
-            fi
-            cd ../../../
+          # پیدا کردن فایل باینری در پوشه هدف (معمولاً نام پروژه در Cargo.toml است)
+          # ما به دنبال فایل اجرایی در مسیر release هستیم
+          OUTPUT_PATH=$(find target/aarch64-unknown-linux-musl/release/ -maxdepth 1 -type f -executable | head -n 1)
+          
+          if [ -n "$OUTPUT_PATH" ]; then
+            BINARY_NAME=$(basename "$OUTPUT_PATH")
+            echo "Found binary: $BINARY_NAME at $OUTPUT_PATH"
+            cp "$OUTPUT_PATH" ./slipstream-client-openwrt
+            tar -czf slipstream-openwrt-aarch64.tar.gz slipstream-client-openwrt
           else
-            echo "Error: Output directory $OUTPUT_DIR not found"
+            echo "Error: Binary not found in target directory!"
+            # نمایش محتویات برای دیباگ در صورت شکست
+            ls -R target/
             exit 1
           fi
 
